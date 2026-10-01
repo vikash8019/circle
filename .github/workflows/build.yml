@@ -2,21 +2,13 @@ name: Build APK
 
 on:
   workflow_dispatch:
-    inputs:
-      app_url:
-        description: "Deployed site URL (e.g. https://circle.vercel.app)"
-        required: true
-        type: string
-      app_name:
-        description: "App name shown on phone"
-        required: false
-        default: "Circle"
-        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -28,26 +20,42 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      - name: Create Capacitor wrapper
-        env:
-          APP_URL: ${{ inputs.app_url }}
-          APP_NAME: ${{ inputs.app_name }}
+      - name: Install project dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build static web app (no server)
+        run: |
+          cat > vite.config.apk.ts << 'VITE'
+          import { defineConfig } from "vite";
+          import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+          import viteReact from "@vitejs/plugin-react";
+          import tailwindcss from "@tailwindcss/vite";
+
+          export default defineConfig({
+            resolve: { tsconfigPaths: true },
+            plugins: [
+              tailwindcss(),
+              tanstackStart({ spa: { enabled: true } }),
+              viteReact(),
+            ],
+          });
+          VITE
+          npx vite build --config vite.config.apk.ts
+          cp dist/client/_shell.html dist/client/index.html
+
+      - name: Wrap with Capacitor
         run: |
           mkdir wrapper && cd wrapper
           npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
-          mkdir www
-          echo '<!doctype html><html><body>Loading...</body></html>' > www/index.html
-          node -e '
-            const fs = require("fs");
-            const cfg = {
-              appId: "com.circle.app",
-              appName: process.env.APP_NAME || "Circle",
-              webDir: "www",
-              server: { url: process.env.APP_URL, cleartext: false }
-            };
-            fs.writeFileSync("capacitor.config.json", JSON.stringify(cfg, null, 2));
-          '
+          cp -r ../dist/client www
+          cat > capacitor.config.json << 'CAP'
+          {
+            "appId": "com.callrejector.app",
+            "appName": "Call Rejector",
+            "webDir": "www"
+          }
+          CAP
           npx cap add android
           npx cap sync android
 
